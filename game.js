@@ -1265,7 +1265,7 @@ class Game {
     if (clock.timeStopSpawnCount >= d.timeStopSpawnCount || !clock.timeStopCirclePos) return;
     const pos = clock.timeStopCirclePos[clock.timeStopSpawnCount];
     if (!pos) return;
-    const sc = this.makeSmallClock(clock, true, true);
+    const sc = this.makeSmallClock(clock, true, true);    // 先 waiting 围一圈，暂停结束前统一释放（2026-09 用户改）
     sc.x = pos.x;
     sc.y = pos.y;
     sc.heading = pos.heading;            // 朝向圆心（敌人）
@@ -1274,10 +1274,11 @@ class Game {
     playSound(SOUNDS.snowGolemThrow);    // 小闹钟生成音效=雪傀儡扔雪球音效（2026-09 用户要求）
   }
 
-  updateSmallClocks(now) {
+  updateSmallClocks(now, onlyOwner) {
     if (!this.items) return;
     this.items.forEach((item) => {
       if (item.type !== 'clock' || !item.smallClocks || item.currentHp <= 0) return;
+      if (onlyOwner !== undefined && item.owner !== onlyOwner) return;   // 时间暂停期间只更新触发方的小时钟
       const enemy = this.nearestEnemyByOwner(item.owner, item.x, item.y);
       if (!enemy) return;
       item.smallClocks = item.smallClocks.filter(sc => {
@@ -1317,7 +1318,9 @@ class Game {
       ownerIdx: ownerIdx,
       clock: clock,                       // 触发暂停的时钟本体（2v2 双时钟时小时钟挂它身上）
       spawnInterval: d.timeStopSpawnInterval,
-      spawnCount: d.timeStopSpawnCount
+      spawnCount: d.timeStopSpawnCount,
+      released: false,                      // 12 个是否已统一释放
+      releaseAt: now + d.timeStopDuration - (d.timeStopReleaseLead || 2000)   // 暂停结束前 2 秒同时释放（2026-09 用户改）
     };
     if (clock) {
       clock.timeStopSpawnCount = 0;
@@ -1370,6 +1373,14 @@ class Game {
       clock.timeStopSpawnNext = now;
       this.spawnTimeStopClock(clock);
     }
+    // 统一释放：暂停结束前 2 秒，12 个一起 waiting=false 同时攻向敌人（2026-09 用户改）
+    if (!ts.released && now >= (ts.releaseAt || 0)) {
+      ts.released = true;
+      while (clock.timeStopSpawnCount < ts.spawnCount) this.spawnTimeStopClock(clock);   // 没冒完的一起补齐，保证 12 个同时放
+      clock.smallClocks.forEach(sc => { sc.waiting = false; });
+    }
+    // 释放后的小闹钟在暂停期间就开始追击攻击（释放前 waiting 围着不动）
+    if (ts.released) this.updateSmallClocks(now, ts.ownerIdx);
   }
 
   drawSmallClocks() {
